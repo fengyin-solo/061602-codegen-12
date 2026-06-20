@@ -7,13 +7,16 @@ import NestScene from './NestScene.vue'
 import WeatherOverlay from './WeatherOverlay.vue'
 import BirdCard from './BirdCard.vue'
 import EventModal from './EventModal.vue'
+import RepairPanel from './RepairPanel.vue'
 import { WEATHER_COLORS } from '@/utils/constants'
+import type { RepairPriority } from '@/types/game'
 
 const router = useRouter()
 const {
   state, allAdults, aliveCount,
   collectBerry, feedBird, calmBird, buryBird,
   releaseBirds, keepAndBreed, returnToStart, tryLoadGame,
+  setRepairPriority, startRepair,
 } = useGameState()
 
 onMounted(() => {
@@ -77,11 +80,12 @@ const handleCollect = (id: string) => {
           </div>
         </div>
 
-        <div class="lg:col-span-6 order-1 lg:order-2 relative rounded-3xl overflow-hidden bg-black/20 border border-white/10 backdrop-blur-sm min-h-[400px]">
+        <div class="lg:col-span-5 order-1 lg:order-2 relative rounded-3xl overflow-hidden bg-black/20 border border-white/10 backdrop-blur-sm min-h-[400px]">
           <NestScene
             :birds="state.birds"
             :berries="state.berries"
             :selected-bird-id="state.selectedBirdId"
+            :nest="state.nest"
             @select-bird="handleSelectBird"
             @collect-berry="handleCollect"
           />
@@ -92,7 +96,16 @@ const handleCollect = (id: string) => {
           </div>
         </div>
 
-        <div class="lg:col-span-3 order-3 min-h-0 flex flex-col rounded-2xl bg-black/20 border border-white/10">
+        <div class="lg:col-span-2 order-3 min-h-0 flex flex-col gap-3 rounded-2xl bg-black/20 border border-white/10 p-3 overflow-y-auto scrollbar-hide">
+          <RepairPanel
+            :nest="state.nest"
+            :food-stock="state.foodStock"
+            @set-priority="(id: string, p: RepairPriority) => setRepairPriority(id, p)"
+            @start-repair="startRepair"
+          />
+        </div>
+
+        <div class="lg:col-span-2 order-4 min-h-0 flex flex-col rounded-2xl bg-black/20 border border-white/10">
           <EventModal
             :state="state"
             :all-adults="allAdults"

@@ -8,6 +8,10 @@ export type BerryType = 'red' | 'blue' | 'golden'
 
 export type GamePhase = 'start' | 'playing' | 'breeding' | 'ended'
 
+export type NestDamageType = 'none' | 'minor' | 'moderate' | 'severe'
+
+export type RepairPriority = 'low' | 'medium' | 'high' | 'urgent'
+
 export interface Bird {
   id: string
   name: string
@@ -46,6 +50,7 @@ export interface GameState {
   dayProgress: number
   currentWeather: Weather
   nextWeatherChangeAt: number
+  previousWeather: Weather
   foodStock: number
   birds: Bird[]
   berries: Berry[]
@@ -56,6 +61,7 @@ export interface GameState {
   eventLog: { id: string; message: string; type: string; timestamp: number }[]
   score?: GameScore
   selectedBirdId?: string
+  nest: NestState
 }
 
 export interface GameScore {
@@ -74,4 +80,40 @@ export interface WeatherEffect {
   healthMod: number
   awayChance?: number
   sickChance?: number
+  damageChance?: number
+  damageSeverity?: number
+}
+
+export interface NestDamage {
+  id: string
+  type: NestDamageType
+  cause: Weather
+  occurredAt: number
+  affectedArea: string
+  description: string
+}
+
+export interface RepairTask {
+  id: string
+  damageId: string
+  area: string
+  description: string
+  priority: RepairPriority
+  progress: number
+  requiredFood: number
+  consumedFood: number
+  completed: boolean
+  assignedBirdId?: string
+  startedAt?: number
+  completedAt?: number
+}
+
+export interface NestState {
+  overallCondition: number
+  damages: NestDamage[]
+  repairTasks: RepairTask[]
+  incubationEfficiencyMod: number
+  feedingEfficiencyMod: number
+  fearMod: number
+  lastDisasterAt?: number
 }

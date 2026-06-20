@@ -1,5 +1,5 @@
 import { reactive, computed, watch } from 'vue'
-import type { GameState, Bird, Berry, GrowthStage, Personality, BerryType, Weather, GameScore } from '@/types/game'
+import type { GameState, Bird, Berry, GrowthStage, Personality, BerryType, Weather, GameScore, NestDamage, NestDamageType, RepairTask, RepairPriority } from '@/types/game'
 import {
   ATTR_MIN, ATTR_MAX, DEATH_THRESHOLD,
   STAGE_DURATION, FOOD_NEED_MULTIPLIER,
@@ -8,6 +8,9 @@ import {
   BERRY_VALUES, WEATHER_CHANGE_INTERVAL, WEATHER_EFFECTS,
   DAY_DURATION, INITIAL_FOOD, MIN_EGGS, MAX_EGGS,
   MAX_BREEDING_ROUNDS, BIRD_NAMES,
+  NEST_DAMAGE_NAMES, DAMAGE_AREAS, DAMAGE_DESCRIPTIONS,
+  REPAIR_FOOD_COST, REPAIR_RATE, EFFICIENCY_PENALTY,
+  REPAIR_SPEED_BONUS,
 } from '@/utils/constants'
 import { randomInt, randomFloat, clamp, randomChoice, generateId, chance } from '@/utils/random'
 import { saveGame, loadGame, clearSave } from '@/utils/storage'
@@ -17,6 +20,7 @@ const createInitialState = (): GameState => ({
   day: 1,
   dayProgress: 0,
   currentWeather: 'sunny',
+  previousWeather: 'sunny',
   nextWeatherChangeAt: Date.now() + WEATHER_CHANGE_INTERVAL,
   foodStock: INITIAL_FOOD,
   birds: [],
@@ -26,6 +30,14 @@ const createInitialState = (): GameState => ({
   breedingCount: 0,
   maxBreedingRounds: MAX_BREEDING_ROUNDS,
   eventLog: [],
+  nest: {
+    overallCondition: 100,
+    damages: [],
+    repairTasks: [],
+    incubationEfficiencyMod: 1.0,
+    feedingEfficiencyMod: 1.0,
+    fearMod: 1.0,
+  },
 })
 
 const state = reactive<GameState>(createInitialState())
@@ -89,6 +101,165 @@ const addEventLog = (message: string, type: string = 'info') => {
   if (state.eventLog.length > 50) state.eventLog.pop()
 }
 
+const determineDamageType = (severity: number): NestDamageType => {
+  if (severity < 0.3) return 'minor'
+  if (severity < 0.65) return 'moderate'
+  return 'severe'
+}
+
+const checkForNestDamage = (weather: Weather) => {
+  const effect = WEATHER_EFFECTS[weather]
+  if (!effect.damageChance || !effect.damageSeverity) return
+
+  if (chance(effect.damageChance)) {
+    const severity = effect.damageSeverity * (0.7 + Math.random() * 0.6)
+    const damageType = determineDamageType(severity)
+    const area = randomChoice(DAMAGE_AREAS)
+    const description = randomChoice(DAMAGE_DESCRIPTIONS[damageType])
+
+    const damage: NestDamage = {
+      id: generateId(),
+      type: damageType,
+      cause: weather,
+      occurredAt: Date.now(),
+      affectedArea: area.id,
+      description: `${area.name}${description}`,
+    }
+
+    state.nest.damages.push(damage)
+    state.nest.lastDisasterAt = Date.now()
+
+    const repairTask: RepairTask = {
+      id: generateId(),
+      damageId: damage.id,
+      area: area.name,
+      description: damage.description,
+      priority: damageType === 'severe' ? 'urgent' : damageType === 'moderate' ? 'high' : 'medium',
+      progress: 0,
+      requiredFood: REPAIR_FOOD_COST[damageType],
+      consumedFood: 0,
+      completed: false,
+    }
+
+    state.nest.repairTasks.push(repairTask)
+
+    const weatherName = weather === 'stormy' ? '暴风' : '大雪'
+    addEventLog(
+      `🏚️ ${weatherName}造成${area.name}${NEST_DAMAGE_NAMES[damageType]}！${description}`,
+      'danger'
+    )
+
+    updateNestEfficiency()
+  }
+}
+
+const updateNestEfficiency = () => {
+  const activeDamages = state.nest.damages.filter(d => {
+    const task = state.nest.repairTasks.find(t => t.damageId === d.id)
+    return !task || !task.completed
+  })
+
+  if (activeDamages.length === 0) {
+    state.nest.overallCondition = 100
+    state.nest.incubationEfficiencyMod = 1.0
+    state.nest.feedingEfficiencyMod = 1.0
+    state.nest.fearMod = 1.0
+    return
+  }
+
+  let maxIncubationPenalty = 1.0
+  let maxFeedingPenalty = 1.0
+  let maxFearPenalty = 1.0
+  let minCondition = 100
+
+  activeDamages.forEach(damage => {
+    const penalty = EFFICIENCY_PENALTY[damage.type]
+    if (penalty.incubation > maxIncubationPenalty) maxIncubationPenalty = penalty.incubation
+    if (penalty.feeding < maxFeedingPenalty) maxFeedingPenalty = penalty.feeding
+    if (penalty.fear > maxFearPenalty) maxFearPenalty = penalty.fear
+
+    const conditionMap: Record<NestDamageType, number> = {
+      none: 100,
+      minor: 80,
+      moderate: 55,
+      severe: 25,
+    }
+    if (conditionMap[damage.type] < minCondition) {
+      minCondition = conditionMap[damage.type]
+    }
+  })
+
+  state.nest.overallCondition = minCondition - (activeDamages.length - 1) * 10
+  state.nest.incubationEfficiencyMod = maxIncubationPenalty
+  state.nest.feedingEfficiencyMod = maxFeedingPenalty
+  state.nest.fearMod = maxFearPenalty
+}
+
+const updateRepairProgress = (deltaMs: number) => {
+  const sortedTasks = [...state.nest.repairTasks]
+    .filter(t => !t.completed)
+    .sort((a, b) => {
+      const priorityOrder: Record<RepairPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+      return priorityOrder[a.priority] - priorityOrder[b.priority]
+    })
+
+  sortedTasks.forEach(task => {
+    if (task.progress >= 100) return
+    if (!task.startedAt) return
+
+    const speedBonus = REPAIR_SPEED_BONUS[task.priority]
+    const progressDelta = REPAIR_RATE * speedBonus * (deltaMs / 1000)
+
+    const foodNeeded = Math.ceil((progressDelta / 100) * task.requiredFood)
+    let canProgress = task.requiredFood === 0
+
+    if (foodNeeded > 0 && task.consumedFood < task.requiredFood) {
+      if (state.foodStock >= foodNeeded) {
+        const actualFood = Math.min(foodNeeded, state.foodStock, task.requiredFood - task.consumedFood)
+        state.foodStock -= actualFood
+        task.consumedFood += actualFood
+        canProgress = true
+      }
+    } else if (task.consumedFood >= task.requiredFood) {
+      canProgress = true
+    }
+
+    if (canProgress) {
+      task.progress = clamp(task.progress + progressDelta, 0, 100)
+
+      if (task.progress >= 100 && !task.completed) {
+        task.completed = true
+        task.completedAt = Date.now()
+
+        const damage = state.nest.damages.find(d => d.id === task.damageId)
+        if (damage) {
+          addEventLog(
+            `✅ ${task.area}修复完成！${task.description}`,
+            'success'
+          )
+        }
+
+        updateNestEfficiency()
+      }
+    }
+  })
+}
+
+const setRepairPriority = (taskId: string, priority: RepairPriority) => {
+  const task = state.nest.repairTasks.find(t => t.id === taskId)
+  if (task && !task.completed) {
+    task.priority = priority
+  }
+}
+
+const startRepair = (taskId: string) => {
+  const task = state.nest.repairTasks.find(t => t.id === taskId)
+  if (task && !task.completed && !task.startedAt) {
+    task.startedAt = Date.now()
+    addEventLog(`🔧 开始修复${task.area}...`, 'info')
+  }
+}
+
 const startGame = () => {
   Object.assign(state, createInitialState())
   usedNames.clear()
@@ -143,6 +314,8 @@ const updateGame = (deltaMs: number) => {
     changeWeather()
   }
 
+  updateRepairProgress(deltaMs)
+
   const weatherEffect = WEATHER_EFFECTS[state.currentWeather]
   const aliveBirds = state.birds.filter(b => !b.isDead)
 
@@ -168,7 +341,8 @@ const updateBird = (bird: Bird, deltaMs: number, weatherEffect: ReturnType<typeo
   }
 
   if (bird.stage === 'egg') {
-    bird.hatchTimeLeft -= deltaMs
+    const hatchSpeed = 1 / state.nest.incubationEfficiencyMod
+    bird.hatchTimeLeft -= deltaMs * hatchSpeed
     if (bird.hatchTimeLeft <= 0) {
       hatchBird(bird)
     }
@@ -192,8 +366,10 @@ const updateBird = (bird: Bird, deltaMs: number, weatherEffect: ReturnType<typeo
     bird.health = clamp(bird.health + HEALTH_RECOVERY_RATE * weatherEffect.healthMod * (deltaMs / 1000), ATTR_MIN, ATTR_MAX)
   }
 
-  if (weatherEffect.fearMod > 1) {
-    bird.fear = clamp(bird.fear + (weatherEffect.fearMod - 1) * 2 * (deltaMs / 1000), ATTR_MIN, ATTR_MAX)
+  const nestFearMod = state.nest.fearMod
+  if (weatherEffect.fearMod > 1 || nestFearMod > 1) {
+    const combinedFearMod = Math.max(weatherEffect.fearMod, nestFearMod)
+    bird.fear = clamp(bird.fear + (combinedFearMod - 1) * 2 * (deltaMs / 1000), ATTR_MIN, ATTR_MAX)
   } else {
     bird.fear = clamp(bird.fear - FEAR_DECAY_RATE * weatherEffect.fearMod * (deltaMs / 1000), ATTR_MIN, ATTR_MAX)
   }
@@ -297,10 +473,16 @@ const buryBird = (birdId: string) => {
 const getWeatherEffects = () => WEATHER_EFFECTS[state.currentWeather]
 
 const changeWeather = () => {
+  const oldWeather = state.currentWeather
   const newWeather = randomChoice(WEATHERS.filter(w => w !== state.currentWeather))
+  state.previousWeather = oldWeather
   state.currentWeather = newWeather
   state.nextWeatherChangeAt = Date.now() + WEATHER_CHANGE_INTERVAL + randomInt(-10000, 10000)
   addEventLog(`🌤️ 天气变化：${newWeather}`, 'info')
+
+  if (oldWeather === 'stormy' || oldWeather === 'snowy') {
+    checkForNestDamage(oldWeather)
+  }
 }
 
 const spawnBerry = () => {
@@ -337,14 +519,17 @@ const feedBird = (birdId: string, amount: number): boolean => {
   if (!bird || bird.isDead || bird.isAway || bird.stage === 'egg') return false
   if (state.foodStock < amount) return false
 
+  const feedingEfficiency = state.nest.feedingEfficiencyMod
+  const effectiveAmount = Math.round(amount * feedingEfficiency)
+
   state.foodStock -= amount
-  bird.hunger = clamp(bird.hunger + amount, ATTR_MIN, ATTR_MAX)
+  bird.hunger = clamp(bird.hunger + effectiveAmount, ATTR_MIN, ATTR_MAX)
   bird.feedingCount++
   bird.lastFedAt = Date.now()
   bird.justFed = true
 
   if (bird.fear > 20) {
-    const fearReduce = bird.personality === 'shy' ? 3 : bird.personality === 'gentle' ? 5 : 4
+    const fearReduce = Math.round((bird.personality === 'shy' ? 3 : bird.personality === 'gentle' ? 5 : 4) * feedingEfficiency)
     bird.fear = clamp(bird.fear - fearReduce, ATTR_MIN, ATTR_MAX)
   }
 
@@ -504,6 +689,8 @@ export function useGameState() {
     restartGame,
     returnToStart,
     tryLoadGame,
+    setRepairPriority,
+    startRepair,
     allAdults,
     aliveCount,
   }

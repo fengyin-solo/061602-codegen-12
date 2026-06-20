@@ -1,4 +1,4 @@
-import type { Weather, WeatherEffect, BerryType, GrowthStage, Personality } from '@/types/game'
+import type { Weather, WeatherEffect, BerryType, GrowthStage, Personality, NestDamageType, RepairPriority } from '@/types/game'
 
 export const ATTR_MIN = 0
 export const ATTR_MAX = 100
@@ -65,8 +65,8 @@ export const WEATHER_CHANGE_INTERVAL = 25000
 export const WEATHER_EFFECTS: Record<Weather, WeatherEffect> = {
   sunny: { hungerMod: 1.0, fearMod: 0.8, healthMod: 1.0 },
   rainy: { hungerMod: 1.3, fearMod: 1.5, healthMod: 0.9, awayChance: 0.08 },
-  snowy: { hungerMod: 1.5, fearMod: 1.2, healthMod: 0.7, sickChance: 0.12 },
-  stormy: { hungerMod: 1.2, fearMod: 2.0, healthMod: 0.6, awayChance: 0.2, sickChance: 0.18 },
+  snowy: { hungerMod: 1.5, fearMod: 1.2, healthMod: 0.7, sickChance: 0.12, damageChance: 0.15, damageSeverity: 0.4 },
+  stormy: { hungerMod: 1.2, fearMod: 2.0, healthMod: 0.6, awayChance: 0.2, sickChance: 0.18, damageChance: 0.35, damageSeverity: 0.7 },
 }
 
 export const WEATHER_NAMES: Record<Weather, string> = {
@@ -110,3 +110,82 @@ export const BIRD_NAMES = [
   '糖糖', '圆圆', '小米', '小麦', '云朵', '星星', '月亮', '太阳',
   '小橘', '小蓝', '小绿', '小红', '阿黄', '阿白', '阿黑', '阿灰',
 ]
+
+export const NEST_DAMAGE_NAMES: Record<NestDamageType, string> = {
+  none: '完好',
+  minor: '轻微损坏',
+  moderate: '中度损坏',
+  severe: '严重损坏',
+}
+
+export const NEST_DAMAGE_EMOJI: Record<NestDamageType, string> = {
+  none: '✅',
+  minor: '⚠️',
+  moderate: '🔧',
+  severe: '🚨',
+}
+
+export const REPAIR_PRIORITY_NAMES: Record<RepairPriority, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+  urgent: '紧急',
+}
+
+export const REPAIR_PRIORITY_COLORS: Record<RepairPriority, string> = {
+  low: 'bg-gray-500',
+  medium: 'bg-yellow-500',
+  high: 'bg-orange-500',
+  urgent: 'bg-red-500',
+}
+
+export const DAMAGE_AREAS = [
+  { id: 'rim', name: '巢边', description: '鸟巢边缘' },
+  { id: 'bottom', name: '巢底', description: '鸟巢底部' },
+  { id: 'lining', name: '内衬', description: '内部铺垫' },
+  { id: 'structure', name: '结构', description: '整体结构' },
+]
+
+export const DAMAGE_DESCRIPTIONS: Record<NestDamageType, string[]> = {
+  none: [''],
+  minor: [
+    '几根草茎松动',
+    '边缘小部分脱落',
+    '内衬轻微移位',
+  ],
+  moderate: [
+    '出现明显裂缝',
+    '底部凹陷变形',
+    '大面积草茎脱落',
+    '内衬部分缺失',
+  ],
+  severe: [
+    '结构断裂',
+    '大面积坍塌',
+    '底部破洞',
+    '整体变形严重',
+  ],
+}
+
+export const REPAIR_FOOD_COST: Record<NestDamageType, number> = {
+  none: 0,
+  minor: 15,
+  moderate: 30,
+  severe: 50,
+}
+
+export const REPAIR_RATE = 0.3
+
+export const EFFICIENCY_PENALTY: Record<NestDamageType, { incubation: number; feeding: number; fear: number }> = {
+  none: { incubation: 1.0, feeding: 1.0, fear: 1.0 },
+  minor: { incubation: 1.15, feeding: 0.9, fear: 1.1 },
+  moderate: { incubation: 1.35, feeding: 0.75, fear: 1.25 },
+  severe: { incubation: 1.6, feeding: 0.55, fear: 1.5 },
+}
+
+export const REPAIR_SPEED_BONUS: Record<RepairPriority, number> = {
+  low: 0.7,
+  medium: 1.0,
+  high: 1.4,
+  urgent: 2.0,
+}
